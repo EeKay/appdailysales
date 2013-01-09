@@ -5,7 +5,7 @@
 # iTune Connect Daily Sales Reports Downloader
 # Copyright 2008-2011 Kirby Turner
 #
-# Version 3.0
+# Version 3.1
 #
 # Latest version and additional information available at:
 #   http://appdailysales.googlecode.com/
@@ -19,6 +19,11 @@
 # As of version 3.0, this script uses Apple's Autoingestion Java
 # program. As such, it no longer does screen scraping.
 #
+# VERSION 3.1 UPDATE:
+# EeKay Added Weekly Reporting mode. Use the -w (or -weekly) parameter to switch 
+# to weekly report downloading.
+# The -d parameter has been replaced by the -n (-number) parameter since it can
+# be days or weeks to download
 #
 # Contributors:
 #   Leon Ho
@@ -27,6 +32,7 @@
 #   Andrew de los Reyes
 #   Maarten Billemont
 #   Daniel Dickison
+#   Edwin Klesman (EeKay)
 #
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -55,8 +61,9 @@ password = 'Your Password'
 vendorId = 'Your Vendor Id'
 outputDirectory = ''
 unzipFile = False
+weeklyReport = False
 verbose = False
-daysToDownload = 1
+numberToDownload = 1
 dateToDownload = None
 outputFormat = None
 debug = False
@@ -85,8 +92,9 @@ class ITCException(Exception):
 #   password
 #   outputDirectory
 #   unzipFile
+#   weeklyReport
 #   verbose
-#   daysToDownload
+#   numberToDownload
 #   dateToDownload
 #   outputFormat
 #   debug
@@ -104,10 +112,12 @@ class ReportOptions:
             return outputDirectory
         elif attrname == 'unzipFile':
             return unzipFile
+        elif attrname == 'weeklyReport':
+            return weeklyReport
         elif attrname == 'verbose':
             return verbose
-        elif attrname == 'daysToDownload':
-            return daysToDownload
+        elif attrname == 'numberToDownload':
+            return numberToDownload
         elif attrname == 'dateToDownload':
             return dateToDownload
         elif attrname == 'outputFormat':
@@ -128,8 +138,9 @@ Options and arguments:
 -P     : read the password from stdin (also --passwordStdin)
 -o dir : directory where download file is stored, default is the current working directory (also --outputDirectory)
 -v     : verbose output, default is off (also --verbose)
+-w     : download weekly report instead of daily, default is off (also --weekly)
 -u     : unzip download file, default is off (also --unzip)
--d num : number of days to download, default is 1 (also --days)
+-n num : number of days/weeks to download, default is 1 (also --number)
 -D mm/dd/yyyy : report date to download, -d option is ignored when -D is used (also --date)
 -f format : output file name format (see strftime; also --format)
 --debug : debug output, default is off''' % sys.argv[0]
@@ -141,8 +152,9 @@ def processCmdArgs():
     global vendorId
     global outputDirectory
     global unzipFile
+    global weeklyReport
     global verbose
-    global daysToDownload
+    global numberToDownload
     global dateToDownload
     global outputFormat
     global debug
@@ -150,7 +162,7 @@ def processCmdArgs():
     # Check for command line options. The command line options
     # override the globals set above if present.
     try: 
-        opts, args = getopt.getopt(sys.argv[1:], 'ha:p:V:Po:uvd:D:f:', ['help', 'appleId=', 'password=', 'venderId=', 'passwordStdin', 'outputDirectory=', 'unzip', 'verbose', 'days=', 'date=', 'format=', 'debug'])
+        opts, args = getopt.getopt(sys.argv[1:], 'ha:p:V:Po:uwvn:D:f:', ['help', 'appleId=', 'password=', 'venderId=', 'passwordStdin', 'outputDirectory=', 'unzip', 'weekly' ,'verbose', 'number=', 'date=', 'format=', 'debug'])
     except getopt.GetoptError, err:
         #print help information and exit
         print str(err)  # will print something like "option -x not recongized"
@@ -173,10 +185,12 @@ def processCmdArgs():
             outputDirectory = a
         elif o in ('-u', '--unzip'):
             unzipFile = True
+        elif o in ('-w', '--weekly'):
+            weeklyReport = True
         elif o in ('-v', '--verbose'):
             verbose = True
-        elif o in ('-d', '--days'):
-            daysToDownload = a
+        elif o in ('-n', '--number'):
+            numberToDownload = a
         elif o in ('-D', '--date'):
             dateToDownload = a
         elif o in ('-f', '--format'):
@@ -201,26 +215,36 @@ def downloadFile(options):
     # consider doing this in the future.
     reportDates = []
     if options.dateToDownload == None:
-        for i in range(int(options.daysToDownload)):
-            today = datetime.date.today() - datetime.timedelta(i + 1)
-            reportDates.append( today )
+        today = datetime.date.today()
+        daysSinceLastSunday=today.weekday()+1
+        for i in range(int(options.numberToDownload)):
+            if options.weeklyReport:
+                calculatedDate = datetime.date.today() - datetime.timedelta(daysSinceLastSunday + (i*7) )
+            else:
+                calculatedDate = datetime.date.today() - datetime.timedelta(i + 1)
+            reportDates.append( calculatedDate )
     else:
         reportDates = [datetime.datetime.strptime(options.dateToDownload, '%m/%d/%Y').date()]
 
     if options.debug:
         print 'reportDates: ', reportDates
 
+    if options.weeklyReport:
+        reportPeriod = 'Weekly'
+    else:
+        reportPeriod = 'Daily'
 
     ####
     if options.verbose:
-        print 'Downloading daily sales reports.'
+        print 'Downloading ' + reportPeriod + ' sales reports.'
     unavailableCount = 0
     filenames = []
     for downloadReportDate in reportDates:
         dateString = downloadReportDate.strftime('%Y%m%d')
         path = os.path.realpath(os.path.dirname(sys.argv[0]))
         
-        output = subprocess.check_output(['java', '-cp', path, 'Autoingestion', appleId, password, vendorId, 'Sales', 'Daily', 'Summary', dateString])
+        output = subprocess.check_output(['java', '-cp', path, 'Autoingestion', appleId, password, vendorId, 'Sales', reportPeriod, 'Summary', dateString])
+
         print output
         lines = output.split('\n')
         
@@ -284,8 +308,9 @@ def main():
     options.password = password
     options.outputDirectory = outputDirectory
     options.unzipFile = unzipFile
+    options.weeklyReport = weeklyReport
     options.verbose = verbose
-    options.daysToDownload = daysToDownload
+    options.numberToDownload = numberToDownload
     options.dateToDownload = dateToDownload
     options.outputFormat = outputFormat
     options.debug = debug
